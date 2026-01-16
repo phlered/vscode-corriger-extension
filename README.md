@@ -5,9 +5,11 @@ Extension VS Code qui fournit un agent de correction personnalisé `@corriger` p
 ## Fonctionnalités
 
 - **Participant de chat `@corriger`** : Invocable directement dans Copilot Chat
+- **Commande `LaTeX: Corriger le document LaTeX`** : Correction directe du document actif
 - **Correction d'exercices LaTeX** : Spécialisé dans les exercices de mathématiques niveau lycée
 - **Génération de diagrammes TikZ** : Tableaux de variations, arbres de probabilité, etc.
 - **Format standardisé** : Correction au format LaTeX avec environnements `\begin{exercice}` et `\begin{correction}`
+- **Support de GitHub Copilot** : Utilise gpt-5.2-codex pour les corrections
 
 ## Utilisation
 
@@ -43,7 +45,17 @@ Extension VS Code qui fournit un agent de correction personnalisé `@corriger` p
 ## Prérequis
 
 - VS Code 1.90.0 ou supérieur
-- GitHub Copilot activé
+- GitHub Copilot activé avec un modèle disponible (gpt-5.2-codex)
+
+## Historique des versions
+
+### 0.0.3
+- **Modifications** : Utilisation du modèle gpt-5.2-codex
+- **Corrections** : Bug de corruption de document, erreur de frappe
+- **Améliorations** : Validation réponse, token d'annulation, activationEvents
+
+### 0.0.1
+- Version initiale
 
 ## Développement
 

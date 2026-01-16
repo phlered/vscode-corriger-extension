@@ -3,5 +3,17 @@ dist
 *.vsix
 .vscode-test
 *.log
+# KiloCode files
 .kilocodemodes
 .kilocode
+# LaTeX intermediate files
+*.aux
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.bbl
+*.blg

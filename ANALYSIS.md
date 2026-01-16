@@ -19,7 +19,7 @@ Le projet "vscode-corriger-extension" est une extension Visual Studio Code qui f
 - **Langage** : TypeScript
 - **Framework** : API Extensions VSCode
 - **Build** : esbuild pour la compilation
-- **Modèle IA** : Claude Sonnet 3.5 via GitHub Copilot
+- **Modèle IA** : gpt-5.2-codex via GitHub Copilot
 
 ### Composants Clés
 
@@ -59,7 +59,7 @@ npm run compile
 ### Installation Utilisateur Final
 ```bash
 npx vsce package
-code --install-extension corriger-latex-0.0.1.vsix
+code --install-extension corriger-latex-<version>.vsix
 ```
 
 ## Utilisation

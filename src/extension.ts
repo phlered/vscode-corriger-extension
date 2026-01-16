@@ -101,18 +101,45 @@ async function corrigerTexte(texte: string, stream?: vscode.ChatResponseStream, 
         )
     ];
 
-    // Sélectionner le modèle Claude Sonnet 4.5
+    // Sélectionner le modèle gpt-5.2-codex
     const [model] = await vscode.lm.selectChatModels({
         vendor: 'copilot',
-        family: 'claude-sonnet'
+        family: 'gpt-5.2-codex'
     });
 
     if (!model) {
-        const errorMsg = '❌ Aucun modèle de langage disponible. Assurez-vous que GitHub Copilot est activé.';
-        if (stream) {
-            stream.markdown(errorMsg);
+        // Fallback: essayer sans filtre de famille
+        const [modelFallback] = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+        if (!modelFallback) {
+            const errorMsg = '❌ Aucun modèle de langage disponible. Assurez-vous que GitHub Copilot est activé.';
+            if (stream) {
+                stream.markdown(errorMsg);
+            }
+            throw new Error(errorMsg);
         }
-        throw new Error(errorMsg);
+        if (stream) {
+            stream.markdown(`⚠️ **gpt-5.2-codex non disponible, utilisation de : ${modelFallback.family}**\n\n`);
+        }
+        const chatResponse = await modelFallback.sendRequest(messages, {}, token);
+        let resultat = '';
+        for await (const fragment of chatResponse.text) {
+            resultat += fragment;
+            if (stream) {
+                stream.markdown(fragment);
+            }
+        }
+        if (!resultat || resultat.trim() === '') {
+            const errorMsg = 'Le modèle n\'a pas généré de correction.';
+            if (stream) {
+                stream.markdown(`❌ ${errorMsg}`);
+            }
+            throw new Error(errorMsg);
+        }
+        return resultat;
+    }
+
+    if (stream) {
+        stream.markdown(`🔧 Utilisation du modèle : **${model.family}**\n\n`);
     }
 
     // Envoyer la requête avec gestion du token d'annulation
@@ -137,6 +164,131 @@ async function corrigerTexte(texte: string, stream?: vscode.ChatResponseStream, 
     }
 
     return resultat;
+}
+
+/**
+ * Valide la structure basique du LaTeX
+ * @returns true si la structure est valide, false sinon
+ */
+function validerStructureLaTeX(texte: string): boolean {
+    // Vérifications basiques de structure
+    const verificateurs = [
+        /\\begin\{exercice\}/,
+        /\\end\{exercice\}/,
+        /\\begin\{enonce\}/,
+        /\\end\{enonce\}/,
+        /\\begin\{correction\}/,
+        /\\end\{correction\}/
+    ];
+
+    // Au moins \begin{exercice} et \end{exercice} doivent être présents
+    const aDebut = texte.includes('\\begin{exercice}');
+    const aFin = texte.includes('\\end{exercice}');
+    const aEnonce = texte.includes('\\begin{enonce}') || texte.includes('\\begin{enonce}');
+    const aCorrection = texte.includes('\\begin{correction}') || texte.includes('\\begin{correction}');
+
+    // Vérifier que le nombre de \begin et \end correspond
+    const countDebutExercice = (texte.match(/\\begin\{exercice\}/g) || []).length;
+    const countFinExercice = (texte.match(/\\end\{exercice\}/g) || []).length;
+    const countDebutEnonce = (texte.match(/\\begin\{enonce\}/gi) || []).length;
+    const countFinEnonce = (texte.match(/\\end\{enonce\}/gi) || []).length;
+
+    const structureValide = aDebut && aFin &&
+        countDebutExercice === countFinExercice &&
+        countDebutEnonce === countFinEnonce &&
+        !texte.includes('x +') &&  // Détecter les corruptions fréquentes
+        !texte.includes('x --') &&
+        !texte.includes('dfrx');
+
+    return structureValide;
+}
+
+/**
+ * Écrit le résultat de manière atomique avec vérification d'intégrité
+ * @param editor L'éditeur actif
+ * @param resultat Le résultat à écrire
+ * @param selection La plage de texte à remplacer (si définie, sinon tout le document)
+ * @returns true si l'écriture a réussi, false sinon
+ */
+async function ecrireCorrectionAtomique(
+    editor: vscode.TextEditor,
+    resultat: string,
+    selection?: vscode.Range
+): Promise<boolean> {
+    const document = editor.document;
+    const contenuInitial = document.getText();
+
+    try {
+        let range: vscode.Range;
+
+        if (selection) {
+            // Remplacer uniquement la sélection
+            range = selection;
+            console.log('[ATOMIC] Remplacement de la sélection uniquement');
+        } else {
+            // Remplacer tout le document
+            range = new vscode.Range(
+                document.positionAt(0),
+                document.positionAt(contenuInitial.length)
+            );
+            console.log('[ATOMIC] Remplacement de tout le document');
+        }
+
+        // Effectuer l'édition de manière atomique
+        await editor.edit(editBuilder => {
+            editBuilder.replace(range, resultat);
+        });
+
+        // Vérifier l'intégrité après écriture
+        const contenuApres = editor.document.getText();
+
+        // Vérifier que le contenu a bien changé (uniquement si remplacement total)
+        if (!selection && contenuApres === contenuInitial) {
+            console.error('[ATOMIC] Écriture n\'a pas modifié le document');
+            return false;
+        }
+
+        // Vérifier la structure LaTeX uniquement si remplacement total
+        if (!selection && !validerStructureLaTeX(contenuApres)) {
+            console.error('[ATOMIC] Structure LaTeX invalide après écriture');
+            console.error('[ATOMIC] Contenu après:', contenuApres.substring(0, 200));
+            return false;
+        }
+
+        // Vérifier que le résultat attendu est présent (uniquement si remplacement total)
+        if (!selection && (!contenuApres.includes('\\begin{correction}') && !contenuApres.includes('\\begin{correction}'))) {
+            console.error('[ATOMIC] Correction non trouvée dans le document après écriture');
+            return false;
+        }
+
+        console.log('[ATOMIC] Écriture atomique réussie');
+        return true;
+
+    } catch (error) {
+        console.error('[ATOMIC] Erreur lors de l\'écriture atomique:', error);
+        return false;
+    }
+}
+
+/**
+ * Restaure le document à son état initial
+ */
+async function restaurerDocument(editor: vscode.TextEditor, contenuInitial: string): Promise<void> {
+    try {
+        const document = editor.document;
+        const fullRange = new vscode.Range(
+            document.positionAt(0),
+            document.positionAt(document.getText().length)
+        );
+
+        await editor.edit(editBuilder => {
+            editBuilder.replace(fullRange, contenuInitial);
+        });
+
+        console.log('[RESTORE] Document restauré à son état initial');
+    } catch (error) {
+        console.error('[RESTORE] Erreur lors de la restauration:', error);
+    }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -166,17 +318,30 @@ export function activate(context: vscode.ExtensionContext) {
                 cancellable: false
             }, async (progress) => {
                 try {
+                    const document = editor.document;
+                    const contenuInitial = document.getText();
+                    console.log('[DEBUG] Longueur du document avant:', contenuInitial.length);
+
                     const resultat = await corrigerTexte(texte, undefined, undefined);
 
-                    // Remplacer tout le contenu du document
-                    const fullRange = new vscode.Range(
-                        document.positionAt(0),
-                        document.positionAt(document.getText().length)
-                    );
+                    console.log('[DEBUG] Longueur du résultat:', resultat.length);
 
-                    await editor.edit(editBuilder => {
-                        editBuilder.replace(fullRange, resultat);
-                    });
+                    // Vérifier la structure avant d'écrire (uniquement si remplacement total)
+                    if (selection.isEmpty && !validerStructureLaTeX(resultat)) {
+                        throw new Error('La correction générée a une structure LaTeX invalide');
+                    }
+
+                    // Déterminer si on remplace la sélection ou tout le document
+                    const rangeToReplace = selection.isEmpty ? undefined : selection;
+
+                    // Écriture atomique avec vérification
+                    const succes = await ecrireCorrectionAtomique(editor, resultat, rangeToReplace);
+
+                    if (!succes) {
+                        // Restaurer l'état initial en cas d'échec
+                        await restaurerDocument(editor, contenuInitial);
+                        throw new Error('Échec de l\'écriture - document restauré');
+                    }
 
                     vscode.window.showInformationMessage('✅ Document corrigé avec succès !');
                 } catch (err) {
@@ -223,7 +388,14 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                 }
 
-                await corrigerTexte(texteACorriger, stream)
+                const resultat = await corrigerTexte(texteACorriger, stream, token);
+
+                console.log('[DEBUG] Résultat longueur:', resultat.length);
+
+                // Le chat affiche uniquement le résultat dans un bloc de code
+                // L'utilisateur peut ensuite copier-coller le résultat dans son fichier
+                stream.markdown('\n**Voici la correction générée :**\n\n```latex\n' + resultat + '\n```\n');
+                stream.markdown('\n💡 *Copiez ce bloc de code et collez-le dans votre fichier LaTeX.*\n');
 
             } catch (err) {
                 if (err instanceof vscode.LanguageModelError) {
