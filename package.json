@@ -23,6 +23,11 @@
         "command": "corriger-latex.corrigerDocument",
         "title": "Corriger le document LaTeX",
         "category": "LaTeX"
+      },
+      {
+        "command": "corriger-latex.diagnostic",
+        "title": "Diagnostic des modèles de langage",
+        "category": "LaTeX"
       }
     ],
     "chatParticipants": [

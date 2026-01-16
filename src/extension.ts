@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { diagnosticModeles } from './diagnostic';
 
 const CORRECTION_INSTRUCTIONS = `# Agent de Correction d'Exercices LaTeX
 
@@ -101,19 +102,38 @@ async function corrigerTexte(texte: string, stream?: vscode.ChatResponseStream, 
         )
     ];
 
-    // Sélectionner le modèle Claude Sonnet 4.5
-    const [model] = await vscode.lm.selectChatModels({
+    // Sélectionner un modèle de langage disponible
+    // Essayer Claude Sonnet 4.5 en priorité
+    let models = await vscode.lm.selectChatModels({
         vendor: 'copilot',
-        family: 'claude-sonnet'
+        family: 'claude-sonnet-4.5'
     });
 
-    if (!model) {
-        const errorMsg = '❌ Aucun modèle de langage disponible. Assurez-vous que GitHub Copilot est activé.';
+    // Si pas disponible, essayer Claude Sonnet 4
+    if (models.length === 0) {
+        models = await vscode.lm.selectChatModels({
+            vendor: 'copilot',
+            family: 'claude-sonnet-4'
+        });
+    }
+
+    // Si toujours pas disponible, prendre n'importe quel modèle Copilot
+    if (models.length === 0) {
+        models = await vscode.lm.selectChatModels({
+            vendor: 'copilot'
+        });
+    }
+
+    if (models.length === 0) {
+        const errorMsg = '❌ Aucun modèle de langage disponible. Vérifiez que GitHub Copilot Chat est activé.';
         if (stream) {
             stream.markdown(errorMsg);
         }
         throw new Error(errorMsg);
     }
+
+    const model = models[0];
+    console.log(`Utilisation du modèle: ${model.vendor}/${model.family}/${model.id}`);
 
     // Envoyer la requête avec gestion du token d'annulation
     const chatResponse = await model.sendRequest(messages, {}, token);
@@ -140,6 +160,19 @@ async function corrigerTexte(texte: string, stream?: vscode.ChatResponseStream, 
 }
 
 export function activate(context: vscode.ExtensionContext) {
+
+    // Commande de diagnostic
+    const diagnosticCmd = vscode.commands.registerCommand(
+        'corriger-latex.diagnostic',
+        async () => {
+            const diagnostic = await diagnosticModeles();
+            const doc = await vscode.workspace.openTextDocument({
+                content: diagnostic,
+                language: 'plaintext'
+            });
+            await vscode.window.showTextDocument(doc);
+        }
+    );
 
     // Commande pour corriger le document actif
     const corrigerDocumentCmd = vscode.commands.registerCommand(
@@ -223,7 +256,7 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                 }
 
-                await corrigerTexte(texteACorriger, stream)
+                await corrigerTexte(texteACorriger, stream, token);
 
             } catch (err) {
                 if (err instanceof vscode.LanguageModelError) {
@@ -240,7 +273,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Définir les propriétés du participant
     corriger.iconPath = new vscode.ThemeIcon('mortar-board');
 
-    context.subscriptions.push(corriger, corrigerDocumentCmd);
+    context.subscriptions.push(corriger, corrigerDocumentCmd, diagnosticCmd);
 }
 
 export function deactivate() { }
